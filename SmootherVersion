@@ -1,0 +1,80 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <arduinoFFT.h>  // For version 2.0.4
+
+// Hardware Configuration
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+#define SOUND_SENSOR_PIN 4     // GPIO4 (ADC1)
+#define LED_PIN 8              // Any GPIO pin
+
+// FFT Configuration
+#define SAMPLE_SIZE 256
+#define SAMPLING_FREQ 5000
+#define BASS_FREQ 200
+
+// Use the template-style initialization that worked in your earlier sketch
+double vReal[SAMPLE_SIZE];
+double vImag[SAMPLE_SIZE];
+ArduinoFFT<double> FFT(vReal, vImag, SAMPLE_SIZE, SAMPLING_FREQ);
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin(7, 6);  // SDA=7, SCL=6
+  
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;);
+  }
+  
+  pinMode(LED_PIN, OUTPUT);
+  analogReadResolution(12);
+  
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.println("System Ready");
+  display.display();
+  delay(1000);
+}
+
+void loop() {
+  // Sampling
+  unsigned long samplingPeriod = round(1000000*(1.0/SAMPLING_FREQ));
+  for(int i=0; i<SAMPLE_SIZE; i++) {
+    unsigned long start = micros();
+    vReal[i] = analogRead(SOUND_SENSOR_PIN);
+    vImag[i] = 0;
+    while(micros() < (start + samplingPeriod)) {}
+  }
+
+  // FFT Processing (using the exact syntax from your working sketch)
+  FFT.windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD);
+  FFT.compute(FFT_FORWARD);
+  FFT.complexToMagnitude();
+
+  // Visualization
+  display.clearDisplay();
+  for(int i=2; i<(SCREEN_WIDTH/4); i++) {
+    int barHeight = map(vReal[i], 0, 20000, 0, SCREEN_HEIGHT-10);
+    display.fillRect(i*4, SCREEN_HEIGHT-barHeight, 3, barHeight, SSD1306_WHITE);
+  }
+  
+  // Simple beat detection
+  float bassEnergy = 0;
+  for(int i=2; i<10; i++) bassEnergy += vReal[i];
+  
+  if(bassEnergy > 50000) {
+    digitalWrite(LED_PIN, HIGH);
+    display.fillRect(0, 0, SCREEN_WIDTH, 10, SSD1306_WHITE);
+  } else {
+    digitalWrite(LED_PIN, LOW);
+  }
+  
+  display.display();
+  delay(50);
+}
